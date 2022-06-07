@@ -1,0 +1,148 @@
+---
+title: "Jellyfish_atlantis"
+author: "Hem Nalini Morzaria-Luna"
+format: html
+editor: visual
+---
+
+## Jellyfish
+
+Modify the current Gelatinous zooplankton group into two, one for Aurelia and other gelatinous zooplankton using data for Green et al. In prep.
+
+```{r}
+#| label: load-packages
+#| include: false
+source("libraries.R")
+```
+
+Used landcover classes at 30 m resolution. Development classes were based on the NCCOS' Coastal Change and Analysis Program (C-CAP, 2006 analysis year). Nationally standardized, raster-based inventories of land cover for the coastal areas of the U.S. Data are derived, through the Coastal Change Analysis Program, from the analysis of multiple dates of remotely sensed imagery. https://coast.noaa.gov/digitalcoast/tools/lca.html. Land classification scheme https://coast.noaa.gov/data/digitalcoast/pdf/ccap-class-scheme-regional.pdf
+
+Calculate %land cover classes per
+
+```{r}
+#| echo: false
+
+atlantis.polygons <- st_read(here("inputs","bgm_Puget_Sound_89b_0p0001_NAD83.shp"))
+
+#this is the area selected for data 
+land.cover.area <- st_read(here("inputs","Job736234_2006_CCAP_index.shp"))
+
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+#check that the land cover area matches Atlantis polygons
+ggplot(data = world) +
+geom_sf(data = land.cover.area) +
+geom_sf(data = atlantis.polygons)
+
+
+land.cover.raster <- raster(here("inputs","Job736234_2006_CCAP.tif"))
+
+#crop.raster <- st_crop(land.cover.raster, atlantis.polygons)
+
+#DEM boundaries of watershed
+#buffer 200 m from the shoreline, is catchment
+
+
+#Agricultural, also Grassland (8)
+land.cover.raster.ag <- land.cover.raster
+land.cover.raster.ag[land.cover.raster.ag>=7] <- 0
+land.cover.raster.ag[land.cover.raster.ag<=5] <- 0
+
+land.cover.raster.ag.df <- as.data.frame(land.cover.raster.ag, xy = TRUE)
+
+land.cover.plot <- ggplot() +
+  geom_raster(data = land.cover.raster.ag.df , aes(x = x, y = y, fill = Job736234_2006_CCAP)) + 
+  coord_quickmap() 
+
+land.cover.plot
+
+#Agricultural categories (6) cultivated crops and (7) pasture
+land.cover.raster.ag <- land.cover.raster
+land.cover.raster.ag[land.cover.raster.ag>=8] <- 0
+land.cover.raster.ag[land.cover.raster.ag<=5] <- 0
+
+land.cover.raster.ag.df <- as.data.frame(land.cover.raster.ag, xy = TRUE)
+
+ag.plot <- ggplot() +
+  geom_raster(data = land.cover.raster.ag.df , aes(x = x, y = y, fill = Job736234_2006_CCAP)) + 
+  coord_quickmap() 
+
+
+#Development categories High (2), Medium (3), Low (4)
+land.cover.raster.dev <- land.cover.raster
+land.cover.raster.dev[land.cover.raster.dev>=6] <- 0
+
+land.cover.raster.dev.df <- as.data.frame(land.cover.raster.dev, xy = TRUE)
+
+dev.plot <- ggplot() +
+  geom_raster(data = land.cover.raster.dev.df , aes(x = x, y = y, fill = Job736234_2006_CCAP)) + 
+  coord_quickmap() 
+
+dev.plot
+```
+
+Model from Green et al. In prep,
+
+```{r}
+#read in dataset 
+jellydf <- read_excel(here("inputs","Revised_Compiled_Data.xlsx"))
+
+pres.sp <- c("Cyanea", "Aurelia", "Aequorea", "Phacellophora", "Pleurobrachia", "Mitrocoma", "Clytia")
+factor.vars  <- c("Basin","Site","Month", "Geomorph")#Convert Variables to Factors and Numerics
+numeric.vars <- c("Pct_Ag","Pct_Dev","CTD_max_cast_temp_C", "CTD_ave_cast_salinity_PSU", "CTD_max_cast_depth_m", "CTD_min_cast_salinity_PSU")
+
+
+new.df <- jellydf %>% 
+ dplyr::mutate(dplyr::across(dplyr::all_of(pres.sp), 
+                ~ sub("0", "Absent", .))) %>% 
+ dplyr::mutate(dplyr::across(dplyr::all_of(pres.sp), 
+                ~ sub("1", "Present", .))) %>% 
+ dplyr::mutate(dplyr::across(dplyr::all_of(factor.vars), 
+                ~ as.factor(.))) %>% 
+ dplyr::mutate(dplyr::across(dplyr::everything(.), 
+                ~ sub("N/A", NA_character_, .))) %>% 
+ dplyr::rename(Pct_Ag = `Microbe_Pct Ag Catch`, Pct_Dev = `Microbe_Pct Dev Catch`) %>% #landscape variables
+ dplyr::mutate(dplyr::across(dplyr::all_of(numeric.vars), #environmental variables
+                ~ as.numeric(.)))   %>% 
+ dplyr::mutate(total = Pct_Dev + Pct_Ag) %>%   
+ dplyr::mutate(scalemaxtemp = scale(CTD_max_cast_temp_C), 
+               scaleavesal = scale(CTD_ave_cast_salinity_PSU),
+               scaleminsal = scale(CTD_min_cast_salinity_PSU),
+               scaledepth = scale(CTD_max_cast_depth_m),
+               #standardized site level variables 
+               scaleag = scale(Pct_Ag), 
+               scaledev = scale(Pct_Dev),
+               scaletotal = scale(total))
+
+
+#Aequorea
+AQmodel <- glmmTMB(Aequorea ~ Geomorph + scaletotal + Geomorph*scaletotal + scalemaxtemp + I(scalemaxtemp^2) + scaleavesal + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(AQmodel)
+
+#Aurelia 
+Amodel <- glmmTMB(Aurelia ~ Geomorph + scaleag + scalemaxtemp + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(Amodel)
+
+#Clytia
+CLmodel <- glmmTMB(Clytia ~ Geomorph + scaleag + scaleminsal + I(scaleminsal^2) + scaledepth + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(CLmodel)
+#the results for this model do not line up!
+
+#Cyanea 
+Cmodel <- glmmTMB(Cyanea ~ Geomorph + scaletotal + scalemaxtemp + I(scalemaxtemp^2) + scaledepth + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(Cmodel)
+
+#Mitrocoma
+Mmodel <-glmmTMB(Mitrocoma ~ Geomorph + scaleag + Geomorph*scaleag + scalemaxtemp + scaleavesal + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(Mmodel)
+
+#Phacellophora
+Pmodel <- glmmTMB(Phacellophora ~ Geomorph + scaledev + Geomorph*scaledev + scalemaxtemp + I(scalemaxtemp^2) + scaleavesal + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(Pmodel)
+
+#Pleurobrachia 
+PLmodel <-glmmTMB(Pleurobrachia ~ Geomorph + scaleag + scaledepth + I(scaledepth^2) + scaleavesal + (1|Basin) + ar1(Month-1|Basin), data = jellydf, family = "binomial", na.action = "na.omit")
+summary(PLmodel)
+```
+
+\`\`\`
