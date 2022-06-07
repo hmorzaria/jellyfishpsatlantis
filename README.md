@@ -1,2 +1,2 @@
 # jellyfishpsatlantis
-Analysis of chnages in Jellyfish abundance and distribution using the Atlantis Ecosystem Model
+Analysis of changes in Jellyfish abundance and distribution using the Atlantis Ecosystem Model
