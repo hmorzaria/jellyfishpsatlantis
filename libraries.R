@@ -1,3 +1,4 @@
+install.packages("rnaturalearthhires", repos = "http://packages.ropensci.org", type = "source")
 
 .packages = c("tidyverse","devtools","readxl",
               "sp","sf","GISTools","rgdal",
